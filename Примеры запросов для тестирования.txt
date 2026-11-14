@@ -1,0 +1,8 @@
+https://www.cbr-xml-daily.ru/daily_json.js
+https://iss.moex.com/iss/index.json					http://localhost:8080/?url=https://iss.moex.com/iss/index.json&user_id=test-user&limit=2
+
+
+
+
+http://localhost:8080/?url=https://iss.moex.com/iss/index.json&user_id=test-user-a&limit=2
+http://localhost:8080/?url=https://iss.moex.com/iss/index.json&user_id=test-user-b&limit=2
