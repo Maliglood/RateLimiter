@@ -90,7 +90,7 @@ func (handler *ProxyHandler) ServeHTTP(responseWriter http.ResponseWriter, reque
 		return
 	}
 
-	handler.proxy(responseWriter, request, goalUrl)
+	handler.proxy(responseWriter, request, goalUrl, limit, userId)
 }
 
 // Вычисление лимита для текущего запроса.
@@ -188,12 +188,21 @@ func (handler *ProxyHandler) writeRateLimitedError(writer http.ResponseWriter, r
 }
 
 // Пересылает запрос на целевой URL.
-func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Request, targetUrl *url.URL) {
+func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Request, targetUrl *url.URL, limit int, userId string) {
+	scheme := "http" // Адрес нашего сервиса для переписывания Location
+
+	if request.TLS != nil {
+		scheme = "https"
+	}
+
+	selfBase := &url.URL{Scheme: scheme, Host: request.Host, Path: "/"}
+
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			// Полностью заменяем URL — joinURLPath не нужен.
 			pr.Out.URL = targetUrl
 			pr.Out.Host = targetUrl.Host
+			pr.SetXForwarded() // Добавляем X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host
 			handler.logger.Debug("proxying", "url", targetUrl.String(), "host", targetUrl.Host)
 		},
 		Transport: handler.transport,
@@ -201,6 +210,31 @@ func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Req
 			handler.logger.Error("proxy error", "target", targetUrl.String(), "err", err)
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 		},
+		ModifyResponse: func(resp *http.Response) error {
+			loc := resp.Header.Get("Location")
+			if loc == "" {
+				return nil
+			}
+
+			// 1. Резолвим Location относительно URL запроса к апстриму.
+			locURL, err := url.Parse(loc)
+			if err != nil {
+				return nil // кривой Location — не трогаем
+			}
+			absolute := resp.Request.URL.ResolveReference(locURL)
+
+			// 2. Собираем URL нашего прокси.
+			proxyURL := *selfBase
+			q := url.Values{}
+			q.Set("url", absolute.String())
+			q.Set("limit", strconv.Itoa(limit))
+			q.Set("user_id", userId)
+			proxyURL.RawQuery = q.Encode()
+
+			resp.Header.Set("Location", proxyURL.String())
+			return nil
+		},
 	}
+
 	proxy.ServeHTTP(writer, request)
 }
