@@ -9,9 +9,9 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"rate-limiter/handler"
-	"rate-limiter/limiter"
-	"rate-limiter/store"
+	"rate-limiter/internal/handler"
+	"rate-limiter/internal/limiter"
+	"rate-limiter/internal/store"
 )
 
 func main() {

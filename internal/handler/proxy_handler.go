@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"time"
 
-	"rate-limiter/limiter"
+	"rate-limiter/internal/limiter"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rate-limiter/store"
+	"rate-limiter/internal/store"
 )
 
 type RedisStore = store.RedisStore
