@@ -1,0 +1,10 @@
+Что демонстрирует этот код с точки зрения перехода с C#/.NET:
+
+Аспект							Реализация в Go										Что важно для C#-разработчика
+--------------------------------------------------------------------------------------------------------------------------------------------------
+Атомарность без блокировок		Lua-скрипт в Redis									Аналог Interlocked / транзакций, но на стороне хранилища
+Конкурентность					sync.Map + per-key sync.Mutex в MemoryStore			Нет ConcurrentDictionary из коробки, но sync.Map решает задачу
+Graceful degradation			atomic.Bool + health-check горутина					Паттерн Circuit Breaker, знакомый по Polly
+HTTP-прокси						httputil.NewSingleHostReverseProxy					Готовый примитив вместо ручного HttpClient
+Управление жизненным циклом		context.WithTimeout, chan struct{} для остановки	CancellationToken + IHostedService
+Конфигурация					Переменные окружения + значения по умолчанию		Проще, чем IConfiguration, но явно и предсказуемо
