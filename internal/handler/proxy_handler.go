@@ -1,4 +1,4 @@
-// handler/proxy_handler.go
+// internal/handler/proxy_handler.go
 // Обработчик запроса:
 // * извлекает лимит из query-параметра (или берёт дефолт из конфига),
 // * вызывает лимитер
@@ -66,7 +66,25 @@ func NewProxyHandler(l *limiter.ResilientLimiter, defaultLimit int, logger *slog
 // проверяет лимит запросов для пользователя и, если лимит не превышен, проксирует запрос на целевой URL.
 // При превышении лимита возвращает "429 Too Many Requests" с заголовком Retry-After.
 func (handler *ProxyHandler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
-	limit, err := handler.getLimit(request)
+	rawURL := request.URL.Query().Get("url")
+	rawLimit := request.URL.Query().Get("limit")
+
+	if rawURL == "" || rawLimit == "" { // Если какого-т о параметра нет - то добираем из тела запроса
+		bodyParams, err := extractFromBody(request)
+		if err != nil {
+			handler.logger.Warn("failed to inspect body", "err", err)
+		}
+
+		if rawURL == "" {
+			rawURL = bodyParams.URL
+		}
+
+		if rawLimit == "" {
+			rawLimit = bodyParams.Limit
+		}
+	}
+
+	limit, err := handler.getLimit(rawLimit, handler.defaultLimit)
 
 	if err != nil {
 		http.Error(responseWriter, err.Error(), http.StatusBadRequest)
@@ -93,12 +111,10 @@ func (handler *ProxyHandler) ServeHTTP(responseWriter http.ResponseWriter, reque
 	handler.proxy(responseWriter, request, goalUrl, limit, userId)
 }
 
-// Вычисление лимита для текущего запроса.
-func (handler *ProxyHandler) getLimit(request *http.Request) (int, error) {
-	raw := request.URL.Query().Get("limit")
-
+// Вычисление лимита из необработанного параметра текущего запроса.
+func (handler *ProxyHandler) getLimit(raw string, defaultLimit int) (int, error) {
 	if raw == "" {
-		return handler.defaultLimit, nil
+		return defaultLimit, nil
 	}
 
 	n, err := strconv.Atoi(raw)

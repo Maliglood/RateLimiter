@@ -1,4 +1,4 @@
-// store/memory_store.go
+// internal/store/memory_store.go
 
 package store
 

@@ -1,4 +1,4 @@
-// store/redis_store.go
+// internal/store/redis_store.go
 
 package store
 

@@ -1,4 +1,4 @@
-// store/store.go
+// internal/store/store.go
 
 package store
 
