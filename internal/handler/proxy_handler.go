@@ -203,6 +203,25 @@ func (handler *ProxyHandler) writeRateLimitedError(writer http.ResponseWriter, r
 	http.Error(writer, "rate limit exceeded", http.StatusTooManyRequests)
 }
 
+// Пробласываем дальше все query-параметры запроса
+func mergeQuery(target *url.URL, incoming url.Values) string {
+	merged := target.Query()
+
+	for k, vs := range incoming {
+		switch k {
+		case "url", "limit", "user_id":
+			// служебные параметры не форвардим
+			continue
+		}
+
+		for _, v := range vs {
+			merged.Set(k, v)
+		}
+	}
+
+	return merged.Encode()
+}
+
 // Пересылает запрос на целевой URL.
 func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Request, targetUrl *url.URL, limit int, userId string) {
 	scheme := "http" // Адрес нашего сервиса для переписывания Location
@@ -215,8 +234,12 @@ func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Req
 
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			// Полностью заменяем URL — joinURLPath не нужен.
-			pr.Out.URL = targetUrl
+			pr.Out.URL.Scheme = targetUrl.Scheme
+			// pr.Out.URL.Path, pr.Out.URL.RawPath = joinURLPath(target, pr.In.URL)
+			pr.Out.URL.Path = targetUrl.Path
+			pr.Out.URL.RawPath = targetUrl.RawPath
+			// pr.Out.URL = targetUrl // Полностью заменяем URL — joinURLPath не нужен.
+			pr.Out.URL.RawQuery = mergeQuery(targetUrl, pr.In.URL.Query())
 			pr.Out.Host = targetUrl.Host
 			pr.SetXForwarded() // Добавляем X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host
 			handler.logger.Debug("proxying", "url", targetUrl.String(), "host", targetUrl.Host)
