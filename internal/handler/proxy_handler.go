@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"time"
 
+	"rate-limiter/internal/config"
 	"rate-limiter/internal/limiter"
 )
 
@@ -66,8 +67,8 @@ func NewProxyHandler(l *limiter.ResilientLimiter, defaultLimit int, logger *slog
 // проверяет лимит запросов для пользователя и, если лимит не превышен, проксирует запрос на целевой URL.
 // При превышении лимита возвращает "429 Too Many Requests" с заголовком Retry-After.
 func (handler *ProxyHandler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
-	rawURL := request.URL.Query().Get("url")
-	rawLimit := request.URL.Query().Get("limit")
+	rawURL := request.URL.Query().Get(config.ParamTargetUrl)
+	rawLimit := request.URL.Query().Get(config.ParamTargetLimit)
 
 	if rawURL == "" || rawLimit == "" { // Если какого-т о параметра нет - то добираем из тела запроса
 		bodyParams, err := extractFromBody(request)
@@ -135,7 +136,7 @@ func getUserId(request *http.Request) string {
 	userId := request.Header.Get("X-User-ID") // Предпочтительный вариант
 
 	if userId == "" {
-		userId = request.URL.Query().Get("user_id") // Запасной вариант
+		userId = request.URL.Query().Get(config.ParamTargetUserId) // Запасной вариант
 	}
 
 	if userId == "" {
@@ -152,10 +153,10 @@ func getUserId(request *http.Request) string {
 
 // Вычисляет целевой URL, обрабатывает (если нужно) и убирает лишние параметры
 func (handler *ProxyHandler) getGoalUrl(r *http.Request) (*url.URL, error) {
-	rawUrl := r.URL.Query().Get("url")
+	rawUrl := r.URL.Query().Get(config.ParamTargetUrl)
 
 	if rawUrl == "" {
-		return nil, errors.New("missing 'url' query parameter")
+		return nil, errors.New("missing '" + config.ParamTargetUrl + "' query parameter")
 	}
 
 	goalUrl, err := url.Parse(rawUrl)
@@ -174,8 +175,8 @@ func (handler *ProxyHandler) getGoalUrl(r *http.Request) (*url.URL, error) {
 
 	// Удаляем limit и url из query, чтобы не передавать их дальше
 	q := goalUrl.Query()
-	q.Del("limit")
-	q.Del("url")
+	q.Del(config.ParamTargetLimit)
+	q.Del(config.ParamTargetUrl)
 	goalUrl.RawQuery = q.Encode()
 
 	handler.logger.Info("Goal Url", "goalUrl", goalUrl)
@@ -209,7 +210,7 @@ func mergeQuery(target *url.URL, incoming url.Values) string {
 
 	for k, vs := range incoming {
 		switch k {
-		case "url", "limit", "user_id":
+		case config.ParamTargetUrl, config.ParamTargetLimit, config.ParamTargetUserId:
 			// служебные параметры не форвардим
 			continue
 		}
@@ -242,7 +243,7 @@ func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Req
 			pr.Out.URL.RawQuery = mergeQuery(targetUrl, pr.In.URL.Query())
 			pr.Out.Host = targetUrl.Host
 			pr.SetXForwarded() // Добавляем X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host
-			handler.logger.Debug("proxying", "url", targetUrl.String(), "host", targetUrl.Host)
+			handler.logger.Debug("proxying", config.ParamTargetUrl, targetUrl.String(), "host", targetUrl.Host)
 		},
 		Transport: handler.transport,
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
@@ -251,12 +252,14 @@ func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Req
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			loc := resp.Header.Get("Location")
+
 			if loc == "" {
 				return nil
 			}
 
 			// 1. Резолвим Location относительно URL запроса к апстриму.
 			locURL, err := url.Parse(loc)
+
 			if err != nil {
 				return nil // кривой Location — не трогаем
 			}
@@ -265,9 +268,9 @@ func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Req
 			// 2. Собираем URL нашего прокси.
 			proxyURL := *selfBase
 			q := url.Values{}
-			q.Set("url", absolute.String())
-			q.Set("limit", strconv.Itoa(limit))
-			q.Set("user_id", userId)
+			q.Set(config.ParamTargetUrl, absolute.String())
+			q.Set(config.ParamTargetLimit, strconv.Itoa(limit))
+			q.Set(config.ParamTargetUserId, userId)
 			proxyURL.RawQuery = q.Encode()
 
 			resp.Header.Set("Location", proxyURL.String())

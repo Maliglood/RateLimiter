@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"rate-limiter/internal/config"
 )
 
 // Верхняя граница размера тела для буферизации (10 MiB).
@@ -65,11 +67,11 @@ func extractJSON(body []byte) (bodyParams, error) {
 
 	var params bodyParams
 
-	if field, ok := data["url"].(string); ok {
+	if field, ok := data[config.ParamTargetUrl].(string); ok {
 		params.URL = field
 	}
 
-	if v, ok := data["limit"]; ok {
+	if v, ok := data[config.ParamTargetLimit]; ok {
 		switch fieldType := v.(type) {
 		case float64:
 			params.Limit = strconv.FormatInt(int64(fieldType), 10)
@@ -90,8 +92,8 @@ func extractForm(body []byte) (bodyParams, error) {
 	}
 
 	return bodyParams{
-		URL:   values.Get("url"),
-		Limit: values.Get("limit"),
+		URL:   values.Get(config.ParamTargetUrl),
+		Limit: values.Get(config.ParamTargetLimit),
 	}, nil
 }
 
@@ -121,10 +123,10 @@ func extractMultipart(body []byte, boundary string) (bodyParams, error) {
 		}
 
 		switch part.FormName() {
-		case "url":
+		case config.ParamTargetUrl:
 			field, _ := io.ReadAll(part)
 			params.URL = string(field)
-		case "limit":
+		case config.ParamTargetLimit:
 			field, _ := io.ReadAll(part)
 			params.Limit = string(field)
 		}
