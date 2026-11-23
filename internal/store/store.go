@@ -1,4 +1,5 @@
 // internal/store/store.go
+// Интерфейс сторов
 
 package store
 

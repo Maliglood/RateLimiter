@@ -131,7 +131,7 @@ func (handler *ProxyHandler) getLimit(raw string, defaultLimit int) (int, error)
 	n, err := strconv.Atoi(raw)
 
 	if err != nil {
-		return 0, fmt.Errorf("Invalid 'limit' parameter: %v", err)
+		return 0, fmt.Errorf("invalid 'limit' parameter: %v", err)
 	}
 
 	if n <= 0 || n > maxLimit {

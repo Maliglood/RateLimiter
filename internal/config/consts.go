@@ -1,4 +1,5 @@
 // internal/config/consts.go
+// Константы сервиса
 
 package config
 

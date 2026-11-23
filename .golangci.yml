@@ -1,0 +1,13 @@
+# .golangci.yml
+version: "2"
+run:
+  timeout: 5m
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - unused
+formatters:
+  enable:
+    - gofmt

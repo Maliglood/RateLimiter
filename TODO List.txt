@@ -59,11 +59,7 @@ reqID := uuid.NewString()
 handler.logger = handler.logger.With("request_id", reqID)
 Прокинуть в контекст + вернуть в X-Request-ID ответа.
 
-10. golangci-lint + Makefile + CI
-.PHONY: test lint build
-test:   ; go test -race -cover ./...
-lint:   ; golangci-lint run
-build:  ; CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/rate-limiter ./cmd/server
++10. golangci-lint + Makefile + CI
 
 11. Сделать конфигурируемым fail-open / fail-closed
 
