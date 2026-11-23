@@ -43,3 +43,10 @@ vet: ## Запустить go vet
 
 .PHONY: all
 all: tidy vet test lint build ## Запустить все основные проверки и сборку
+
+.PHONY: fmt-check
+fmt-check: ## Проверить, что все файлы отформатированы (для CI)
+	@files="$$(gofmt -l ./cmd ./internal)"; \
+	if [ -n "$$files" ]; then \
+		echo "Не отформатированы:"; echo "$$files"; exit 1; \
+	fi

@@ -24,6 +24,8 @@ jobs:
           version: v2.13 # Рекомендуется использовать актуальную версию
           # Опция ниже позволяет линтить только новый код в PR, что ускоряет проверку
           # only-new-issues: true
+      - name: Check formatting
+        run: make fmt-check
 
   test:
     name: Test
