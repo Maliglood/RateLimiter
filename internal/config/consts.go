@@ -10,5 +10,5 @@ const (
 	ParamTargetLimit = "_rl_limit"
 
 	// Имя query-параметра для установленного идентификатора пользователя.
-	ParamTargetUserId = "_rl_user_id"
+	ParamUserId = "_rl_user_id"
 )

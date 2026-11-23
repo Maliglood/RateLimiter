@@ -30,19 +30,21 @@ func extractFromBody(request *http.Request) (bodyParams, error) {
 		return bodyParams{}, nil
 	}
 
-	body, err := io.ReadAll(io.LimitReader(request.Body, maxBodySize+1)) // Читаем тело в память и сразу восстанавливаем
-	_ = request.Body.Close()
+	origBody := request.Body
+	body, err := io.ReadAll(io.LimitReader(origBody, maxBodySize+1)) // Читаем тело в память
 
 	if err != nil {
 		return bodyParams{}, err
 	}
 
-	request.Body = io.NopCloser(bytes.NewReader(body))
-
 	if len(body) > maxBodySize {
-		return bodyParams{}, nil // слишком большое — не парсим, не трогаем
+		// слишком большое — склеивваем обратно и больше не трогаем
+		request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), origBody))
+		return bodyParams{}, nil
 	}
 
+	_ = origBody.Close()
+	request.Body = io.NopCloser(bytes.NewReader(body))
 	mediaType, params, _ := mime.ParseMediaType(request.Header.Get("Content-Type"))
 
 	switch mediaType {

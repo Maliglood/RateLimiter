@@ -20,6 +20,7 @@ func main() {
 	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
 	defaultLimit := getEnvInt("DEFAULT_LIMIT", 60)
 	listenAddr := getEnv("LISTEN_ADDR", ":8080")
+	corsOrigin := getEnv("CORS_ORIGIN", "*")
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr:         redisAddr,
@@ -39,15 +40,24 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", proxyHandler)
 
+	corsHandler := handler.CORS(mux, corsOrigin)
+
 	server := &http.Server{
-		Addr:         listenAddr,
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              listenAddr,
+		Handler:           corsHandler,
+		ReadHeaderTimeout: 5 * time.Second, // защита от slowloris
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      0, // управляем через context на прокси
+		IdleTimeout:       60 * time.Second,
 	}
 
-	logger.Info("starting rate limiter", "addr", listenAddr, "redis", redisAddr, "default_limit", defaultLimit)
+	logger.Info("starting rate limiter",
+		"addr", listenAddr,
+		"redis", redisAddr,
+		"default_limit", defaultLimit,
+		"cors_origin", corsOrigin,
+	)
+
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server failed", "err", err)
 		os.Exit(1)

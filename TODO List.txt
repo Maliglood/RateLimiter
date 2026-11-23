@@ -1,7 +1,76 @@
 Возможные улучшения для production:
-1. Метрики: добавить Prometheus-метрики (rate_limiter_requests_total{backend="redis|memory"}, rate_limiter_fallback_active), чтобы видеть, как часто срабатывает резерв.
-2. Идемпотентность ключа: использовать хэш от userID + targetURL, если один пользователь ходит к разным апстримам с разными лимитами.
-3. Динамическая конфигурация лимитов: хранить per-user лимиты в Redis (аналог ClientConfig из NVIDIA go-ratelimit) и обновлять их без рестарта.
-4. Тесты: для MemoryStore — параллельные вызовы через sync.WaitGroup; для RedisStore — интеграционный тест с miniredis или testcontainers.
-5. Билд Docker-контейнера для возможности встроить его в свой кластер в качеств одного из API Gateway.
-6. Билд в качестве плагина к Kong.
+1. Тесты: для MemoryStore — параллельные вызовы через sync.WaitGroup; для RedisStore — интеграционный тест с miniredis или testcontainers.
+	redis_store_test.go — с github.com/alicebob/miniredis/v2, проверить: пропуск до лимита, отказ после, retryAfter монотонно убывает;
+	memory_store_test.go — те же сценарии + go test -race для проверки sync.Map;
+	resilient_test.go — падение Redis → fallback на память → восстановление;
+	body_extract_test.go — JSON, form, multipart, тело > 10 MiB (проверить, что не обрезано), не-объектный JSON (проверить, что тело восстановлено);
+	proxy_handler_test.go — табличные тесты getLimit, getUserId, getGoalUrl;
+	BenchmarkMemoryStoreAllow для профилирования.
+
+2. Graceful shutdown
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+
+go func() {
+    <-ctx.Done()
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+    defer cancel()
+    _ = server.Shutdown(shutdownCtx)
+}()
+
+3. Добавить /healthz и /readyz для k8s:
+mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+    w.WriteHeader(http.StatusOK)   // процесс жив
+})
+mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+    // готов принимать трафик: Redis доступен ИЛИ memory готов
+    w.WriteHeader(http.StatusOK)
+})
+
+4. Вместо http.Error из text/plain с текстом отдавать
+{"error": "rate_limit_exceeded", "message": "limit 5/min exceeded", "retry_after": 42}
+
+5. В README.md добавить:
+	curl-примеры для GET/POST/JSON/form/multipart/превышения лимита;
+	таблицу параметров (_rl_url, _rl_limit, _rl_user_id, X-User-ID);
+	схему архитектуры;
+
+6. Билд Docker-контейнера (Multi-stage + FROM scratch) для возможности встроить его в свой кластер в качеств одного из API Gateway, а также docker-compose.yml с Redis и сервисом для локального запуска.
+
+7. Метрики: добавить Prometheus-метрики (rate_limiter_requests_total{backend="redis|memory"}, rate_limiter_fallback_active), чтобы видеть, как часто срабатывает резерв.
+rateLimiterRequestsTotal{result="allowed|denied|error"}
+rateLimiterFallbackActive{}                  // gauge 0/1
+rateLimiterStoreLatencySeconds{store="redis|memory"}
+Endpoint /metrics через promhttp.Handler()
+
+8. Конфиг через структуру + Load() с валидацией:
+type Config struct {
+    ListenAddr    string
+    RedisAddr     string
+    DefaultLimit  int
+    Window        time.Duration
+    PublicBaseURL *url.URL
+    BackendBase   *url.URL
+    CORSOrigin    string
+}
+
+9. Добавить request_id в логи:
+reqID := uuid.NewString()
+handler.logger = handler.logger.With("request_id", reqID)
+Прокинуть в контекст + вернуть в X-Request-ID ответа.
+
+10. golangci-lint + Makefile + CI
+.PHONY: test lint build
+test:   ; go test -race -cover ./...
+lint:   ; golangci-lint run
+build:  ; CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/rate-limiter ./cmd/server
+
+11. Сделать конфигурируемым fail-open / fail-closed
+
+12. Объединить slidingWindowScript и ZRangeWithScores в один Lua-скрипт
+
+13. Сделать идемпотентность ключа: использовать хэш от userID + targetURL, если один пользователь ходит к разным апстримам с разными лимитами.
+
+14. Сделать динамическую конфигурацию лимитов: хранить per-user лимиты в Redis (аналог ClientConfig из NVIDIA go-ratelimit) и обновлять их без рестарта.
+
+15. Реализовать билд в качестве плагина к Kong.

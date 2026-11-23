@@ -28,6 +28,9 @@ const (
 
 	// limiterTimeout — предел времени на проверку лимита (Redis/память).
 	limiterTimeout = 2 * time.Second
+
+	// SLA для апстрима
+	proxyTimeout = 60 * time.Second
 )
 
 // Проксирует HTTP-запросы с предварительной проверкой rate limit.
@@ -47,8 +50,6 @@ func newTransport() *http.Transport {
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 		IdleConnTimeout:       30 * time.Second,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
 		DisableKeepAlives:     true,
 	}
 }
@@ -72,6 +73,7 @@ func (handler *ProxyHandler) ServeHTTP(responseWriter http.ResponseWriter, reque
 
 	if rawURL == "" || rawLimit == "" { // Если какого-т о параметра нет - то добираем из тела запроса
 		bodyParams, err := extractFromBody(request)
+
 		if err != nil {
 			handler.logger.Warn("failed to inspect body", "err", err)
 		}
@@ -102,7 +104,15 @@ func (handler *ProxyHandler) ServeHTTP(responseWriter http.ResponseWriter, reque
 		return
 	}
 
-	goalUrl, err := handler.getGoalUrl(request)
+	if err := stripFromBody(request,
+		config.ParamTargetUrl,
+		config.ParamTargetLimit,
+		config.ParamUserId,
+	); err != nil {
+		handler.logger.Warn("failed to strip body params", "err", err)
+	}
+
+	goalUrl, err := handler.getGoalUrl(rawURL)
 
 	if err != nil {
 		http.Error(responseWriter, err.Error(), http.StatusBadRequest)
@@ -133,10 +143,14 @@ func (handler *ProxyHandler) getLimit(raw string, defaultLimit int) (int, error)
 
 // Вычисление идентификатора пользователя
 func getUserId(request *http.Request) string {
-	userId := request.Header.Get("X-User-ID") // Предпочтительный вариант
+	userId := request.Header.Get("X-Rate-Limiter-User-ID") // Предпочтительный вариант
 
 	if userId == "" {
-		userId = request.URL.Query().Get(config.ParamTargetUserId) // Запасной вариант
+		userId = request.Header.Get("X-User-ID") // Запасной вариант №1
+	}
+
+	if userId == "" {
+		userId = request.URL.Query().Get(config.ParamUserId) // Запасной вариант №2
 	}
 
 	if userId == "" {
@@ -152,9 +166,7 @@ func getUserId(request *http.Request) string {
 }
 
 // Вычисляет целевой URL, обрабатывает (если нужно) и убирает лишние параметры
-func (handler *ProxyHandler) getGoalUrl(r *http.Request) (*url.URL, error) {
-	rawUrl := r.URL.Query().Get(config.ParamTargetUrl)
-
+func (handler *ProxyHandler) getGoalUrl(rawUrl string) (*url.URL, error) {
 	if rawUrl == "" {
 		return nil, errors.New("missing '" + config.ParamTargetUrl + "' query parameter")
 	}
@@ -179,7 +191,7 @@ func (handler *ProxyHandler) getGoalUrl(r *http.Request) (*url.URL, error) {
 	q.Del(config.ParamTargetUrl)
 	goalUrl.RawQuery = q.Encode()
 
-	handler.logger.Info("Goal Url", "goalUrl", goalUrl)
+	handler.logger.Debug("Goal Url", "goalUrl", goalUrl)
 
 	return goalUrl, nil
 }
@@ -210,13 +222,14 @@ func mergeQuery(target *url.URL, incoming url.Values) string {
 
 	for k, vs := range incoming {
 		switch k {
-		case config.ParamTargetUrl, config.ParamTargetLimit, config.ParamTargetUserId:
+		case config.ParamTargetUrl, config.ParamTargetLimit, config.ParamUserId:
 			// служебные параметры не форвардим
 			continue
 		}
 
+		merged.Del(k)
 		for _, v := range vs {
-			merged.Set(k, v)
+			merged.Add(k, v)
 		}
 	}
 
@@ -230,6 +243,10 @@ func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Req
 	if request.TLS != nil {
 		scheme = "https"
 	}
+
+	ctx, cancel := context.WithTimeout(request.Context(), proxyTimeout)
+	defer cancel()
+	request = request.WithContext(ctx) // Используем прокси с новым контекстом
 
 	selfBase := &url.URL{Scheme: scheme, Host: request.Host, Path: "/"}
 
@@ -270,7 +287,7 @@ func (handler *ProxyHandler) proxy(writer http.ResponseWriter, request *http.Req
 			q := url.Values{}
 			q.Set(config.ParamTargetUrl, absolute.String())
 			q.Set(config.ParamTargetLimit, strconv.Itoa(limit))
-			q.Set(config.ParamTargetUserId, userId)
+			q.Set(config.ParamUserId, userId)
 			proxyURL.RawQuery = q.Encode()
 
 			resp.Header.Set("Location", proxyURL.String())
